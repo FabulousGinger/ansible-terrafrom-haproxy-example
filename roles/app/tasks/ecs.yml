@@ -1,12 +1,15 @@
 ---
 
+# registering a docker tag based off the git log. 
 - name: registering tag for docker image
   command: git log --pretty=format:'%h' -n 1
   register: docker_image_tag
 
+# logging into ecr to be able to push the image in the next step.
 - name: login to ecr
   shell: "eval $(aws ecr get-login --region {{ region }} --no-include-email)"
 
+# building and pusing the docker image of every app to the ecr.
 - name: building and pushing docker image
   docker_image:
     build:
@@ -18,6 +21,8 @@
     source: build
   with_items: "{{ apps }}"
 
+# creating a task definition with the docker image created in the last step for
+# each app.
 - name: setting task definition
   ecs_taskdefinition:
     family: "{{ item }}-example"
@@ -44,6 +49,8 @@
   register: task_output
   with_items: "{{ apps }}"
 
+# updating the service for each app to use the new task definition in the 
+# previous step.
 - name: setting service
   ecs_service:
     name: "{{ item.0.item }}-example"

@@ -1,9 +1,11 @@
 ---
+# terraform needs a directory to work out of, this step creates that directory.
 - name: setting terraform project
   file:
     path: "roles/proxy/haproxy"
     state: directory
 
+# added a check to verify if a file exist before downloading it in the next step.
 - name: checking current terraform from s3
   aws_s3:
     bucket: "{{ bucket }}"
@@ -11,6 +13,7 @@
     mode: list
   register: terraform_s3
 
+# downloading the file if it does exist, otherwise skipping this step.
 - name: downloading current terraform from s3
   aws_s3:
     bucket: "{{ bucket }}"
@@ -19,12 +22,15 @@
     mode: get
   when: (terraform_s3.s3_keys | length>0 )
 
+# creating the terraform main.tf from a template and registering if there is any
+# change in the file.
 - name: setting terraform files
   template:
     src: main.tf.j2
     dest: "roles/proxy/haproxy/main.tf"
   register: terraform_template
 
+# running an apply on terraform file if there was a change, otherwise skipping.
 - name: applying terraform
   terraform:
     project_path: "roles/proxy/haproxy/"
@@ -33,11 +39,13 @@
   register: terraform_apply
   when: terraform_template.changed
 
+# displaying the output of the terraform apply for logging.
 - name: displaying terraform output
   debug:
     msg: "{{ terraform_apply.stdout_lines }}"
   when: terraform_template.changed
 
+# uploading the new terraform file if there was a change, otherwise skipping.
 - name: uploading terraform to s3 on change
   aws_s3:
     bucket: "{{ bucket }}"
@@ -46,12 +54,16 @@
     mode: put
   when: terraform_template.changed
 
+# if there was no change in the terraform file run terraform init to be able to
+# run terraform output in the next step.
 - name: running terraform init
   command: terraform init
   args:
     chdir: "roles/proxy/haproxy/"
   when: terraform_template.changed == false
 
+# registering the target group arn of the haproxy that was set in terraform.
+# this will be used in the ecs task to add the container to the target group.
 - name: registering terraform target group arn output
   command: terraform output
   args:
