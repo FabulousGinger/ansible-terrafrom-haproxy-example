@@ -1,0 +1,85 @@
+---
+- name: checking current haproxy.cfg from s3
+  aws_s3:
+    bucket: "{{ bucket }}"
+    prefix: example/haproxy/haproxy.cfg
+    mode: list
+  register: haproxy_s3
+
+- name: downloading current haproxy.cfg from s3
+  aws_s3:
+    bucket: "{{ bucket }}"
+    object: /example/haproxy/haproxy.cfg
+    dest: roles/proxy/docker/haproxy.cfg
+    mode: get
+  when: (haproxy_s3.s3_keys | length>0 )
+
+- name: creating haproxy.cfg from template
+  template:
+    src: haproxy.cfg.j2
+    dest: roles/proxy/docker/haproxy.cfg
+  register: haproxy
+
+- name: registering tag for docker image
+  command: git log --pretty=format:'%h' -n 1
+  register: docker_image_tag
+  when: haproxy.changed
+
+- name: login to ecr
+  shell: "eval $(aws ecr get-login --region {{ region }} --no-include-email)"
+
+- name: building and pushing docker image
+  docker_image:
+    build:
+      path: roles/proxy/docker/.
+    name: "{{ repository_name }}/haproxy-example"
+    tag: "{{ docker_image_tag.stdout }}"
+    push: yes
+    source: build
+    force: yes
+  when: haproxy.changed
+
+- name: setting task definition
+  ecs_taskdefinition:
+    family: haproxy-example
+    containers:
+    - name: haproxy
+      cpu: "{{ task_cpu }}"
+      essential: true
+      image: "{{ repository_name }}/haproxy-example:{{ docker_image_tag.stdout }}"
+      memory: "{{ task_memory }}"
+      portMappings:
+      - containerPort: 80
+        hostPort: 0
+      logConfiguration:
+        logDriver: awslogs
+        options:
+          awslogs-group: /ecs/example/haproxy
+          awslogs-region: "{{ region }}"
+          awslogs-stream-prefix: haproxy
+    state: present
+    region: "{{ region }}"
+  register: task_output
+  when: haproxy.changed
+
+- name: setting service
+  ecs_service:
+    name: haproxy-example
+    cluster: "{{ ecs_cluster }}"
+    task_definition: "{{ task_output.taskdefinition.family }}:{{ task_output.taskdefinition.revision }}"
+    desired_count: 1
+    region: "{{ region }}"
+    load_balancers:
+      - targetGroupArn: "{{ terraform_output.stdout | regex_replace('tg_arn = ', '') }}"
+        containerName: haproxy
+        containerPort: 80
+    state: present
+  when: haproxy.changed
+
+- name: uploading haproxy.cfg to s3 on change
+  aws_s3:
+    bucket: "{{ bucket }}"
+    object: "/example/haproxy/haproxy.cfg"
+    src: roles/proxy/docker/haproxy.cfg
+    mode: put
+  when: haproxy.changed

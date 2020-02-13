@@ -1,0 +1,44 @@
+provider "aws" {
+  region  = "{{ region }}"
+}
+
+terraform {
+  required_version = ">= 0.11"
+
+  backend "s3" {
+    bucket  = "{{ bucket }}"
+    key     = "example/{{ item }}/terraform.tfstate"
+    region  = "{{ region }}"
+  }
+}
+
+resource "aws_cloudwatch_log_group" "example-{{ item }}-cloudwatch" {
+  name = "/ecs/example/{{ item }}"
+}
+
+resource "aws_service_discovery_service" "{{ item }}" {
+  name = "_{{ item }}"
+
+  dns_config {
+    namespace_id = "{{ namespace_id }}"
+
+    dns_records {
+      ttl  = 10
+      type = "SRV"
+    }
+
+    routing_policy = "MULTIVALUE"
+  }
+
+  health_check_custom_config {
+    failure_threshold = 1
+  }
+}
+
+resource "aws_ecr_repository" "{{ item }}" {
+  name = "{{ item }}-example"
+}
+
+output "service_id" {
+	value = "${aws_service_discovery_service.{{ item }}.id}"
+}

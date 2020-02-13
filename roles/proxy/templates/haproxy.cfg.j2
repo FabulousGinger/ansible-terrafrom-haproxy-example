@@ -1,0 +1,69 @@
+global
+    log 127.0.0.1 local0 debug
+    daemon
+    maxconn 256
+
+defaults
+    log global
+    mode http
+    option httplog
+    option dontlognull
+    option httpclose
+    option forwardfor
+    option http-server-close
+    timeout connect 5s
+    timeout connect 5s
+    timeout check 5s
+    timeout client 30s
+    timeout server 30s
+
+resolvers awsdns
+    # awsdns is the at .2 on the last octet of the vpc
+    nameserver dns {{ aws_dns }}:53
+    accepted_payload_size 8192
+    hold obsolete 30s
+    hold valid 10s
+    timeout resolve 1s
+
+frontend http-in
+    bind *:80
+    bind *:443 alpn h2,http/1.1
+
+    monitor-uri /haproxy?monitor
+    monitor fail if
+
+    default_backend no-match
+
+    # URL ACL
+    acl example-proxy-acl hdr_beg(Host) proxy.{{ base_url }}
+{% for app in apps %}
+    acl {{ app }}-acl hdr_beg(Host) {{ app }}.{{ base_url }}
+{% endfor %}
+
+    # BACKEND SERVER RULES
+    use_backend example-proxy-backend if example-proxy-acl
+{% for app in apps %}
+    use_backend {{ app }}-backend if {{ app }}-acl
+{% endfor %}
+
+{% for app in apps %}
+backend {{ app }}-backend
+    server-template {{ app }}-node 1-2 _{{ app }}.{{ namespace }} check resolvers awsdns resolve-opts allow-dup-ip init-addr none
+ 
+{% endfor %}
+
+backend example-proxy-backend
+    stats enable
+    stats realm Haproxy\ Statistics
+    stats uri /haproxy?stats
+    stats enable
+    stats refresh 10s
+
+    acl whitelist_address req.fhdr(X-Forwarded-For) -m ip {{ whitelist_ip }}/32
+    http-request deny if !whitelist_address
+
+    http-request set-path /haproxy?stats
+    server Local localhost:80
+
+backend no-match
+    http-request redirect code 301 location {{ no_match_url }}

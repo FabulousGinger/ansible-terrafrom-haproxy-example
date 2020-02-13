@@ -1,0 +1,14 @@
+---
+- hosts: 127.0.0.1
+  connection: local
+  gather_facts: false
+
+  tasks:
+
+  - name: running proxy role
+    include_role:
+      name: proxy
+
+  - name: running app role
+    include_role:
+      name: app

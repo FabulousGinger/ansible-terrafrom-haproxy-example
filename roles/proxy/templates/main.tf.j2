@@ -1,0 +1,78 @@
+provider "aws" {
+  region  = "{{ region }}"
+}
+
+terraform {
+  required_version = ">= 0.11"
+
+  backend "s3" {
+    bucket  = "{{ bucket }}"
+    key     = "example/haproxy/terraform.tfstate"
+    region  = "{{ region }}"
+  }
+}
+
+data "terraform_remote_state" "network" {
+  backend = "s3"
+
+  config {
+    bucket  = "{{ bucket }}"
+    key     = "terraform.tfstate"
+    region  = "{{ region }}"
+  }
+}
+
+data "terraform_remote_state" "frontend" {
+  backend = "s3"
+
+  config {
+    bucket  = "{{ bucket }}"
+    key     = "frontend/terraform.tfstate"
+    region  = "{{ region }}"
+  }
+}
+
+resource "aws_cloudwatch_log_group" "proxy-example-cloudwatch" {
+  name = "/ecs/example/haproxy"
+}
+
+resource "aws_alb_target_group" "alb_tg" {
+  name                               = "proxy-example"
+  port                               = "80"
+  protocol                           = "HTTP"
+  vpc_id                             = "${data.terraform_remote_state.network.vpc_id}"
+  deregistration_delay               = "5"
+  lambda_multi_value_headers_enabled = "false"
+  proxy_protocol_v2                  = "false"
+
+  health_check {
+    path    = "/haproxy?monitor"
+    matcher = "200"
+    healthy_threshold = "3"
+    unhealthy_threshold = "3"
+  }
+}
+
+resource "aws_lb_listener_rule" "alb_lr" {
+  listener_arn = "${data.terraform_remote_state.frontend.listener_arn}"
+
+  action {
+    type             = "forward"
+    target_group_arn = "${aws_alb_target_group.alb_tg.arn}"
+  }
+
+  condition {
+    host_header {
+      values = ["*.{{ base_url }}"]
+    }
+  }
+
+}
+
+resource "aws_ecr_repository" "haproxy" {
+  name = "haproxy-example"
+}
+
+output "tg_arn" {
+	value = "${aws_alb_target_group.alb_tg.arn}"
+}

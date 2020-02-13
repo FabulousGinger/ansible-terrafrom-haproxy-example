@@ -1,0 +1,9 @@
+---
+- name: including env vars
+  include_vars: haproxy.yml
+
+- name: including terraform task
+  include: terraform.yml
+
+- name: including ecs task
+  include: ecs.yml

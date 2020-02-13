@@ -1,0 +1,61 @@
+---
+- name: setting terraform project
+  file:
+    path: "roles/app/example-{{ item }}"
+    state: directory
+  with_items: "{{ apps }}"
+
+- name: checking current terraform from s3
+  aws_s3:
+    bucket: "{{ bucket }}"
+    prefix: "example/{{ item }}/main.tf"
+    mode: list
+  register: terraform_s3
+  with_items: "{{ apps }}"
+
+- name: downloading current terraform from s3
+  aws_s3:
+    bucket: "{{ bucket }}"
+    object: "/example/{{ item.item }}/main.tf"
+    dest: "roles/app/example-{{ item.item }}/main.tf"
+    mode: get
+  when: (item.s3_keys | length>0 )
+  with_items: "{{ terraform_s3.results }}"
+
+- name: setting terraform files
+  template:
+    src: main.tf.j2
+    dest: "roles/app/example-{{ item }}/main.tf"
+  register: terraform_template
+  with_items: "{{ apps }}"
+
+- name: applying terraform
+  terraform:
+    project_path: "roles/app/example-{{ item.item }}/"
+    force_init: yes
+    state: present
+  when: item.changed
+  with_items: "{{ terraform_template.results }}"
+
+- name: uploading terraform to s3 on change
+  aws_s3:
+    bucket: "{{ bucket }}"
+    object: "/example/{{ item.item }}/main.tf"
+    src: "roles/app/example-{{ item.item }}/main.tf"
+    mode: put
+  when: item.changed
+  with_items: "{{ terraform_template.results }}"
+
+- name: running terraform init
+  command: terraform init
+  args:
+    chdir: "roles/app/example-{{ item.item }}/"
+  when: item.changed == false
+  with_items: "{{ terraform_template.results }}"
+
+- name: registering terraform service id output
+  command: terraform output
+  args:
+    chdir: "roles/app/example-{{ item }}/"
+  register: terraform_output
+  with_items: "{{ apps }}"

@@ -1,0 +1,7 @@
+---
+  task_cpu: VALUE
+  task_memory: VALUE
+  ecs_cluster: VALUE
+  no_match_url: VALUE
+  aws_dns: VALUE
+  whitelist_ip: VALUE

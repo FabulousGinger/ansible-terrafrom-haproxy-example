@@ -1,0 +1,4 @@
+---
+  task_cpu: VALUE
+  task_memory: VALUE
+  ecs_cluster: VALUE

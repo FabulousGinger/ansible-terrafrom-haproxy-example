@@ -1,0 +1,62 @@
+---
+
+- name: registering tag for docker image
+  command: git log --pretty=format:'%h' -n 1
+  register: docker_image_tag
+
+- name: login to ecr
+  shell: "eval $(aws ecr get-login --region {{ region }} --no-include-email)"
+
+- name: building and pushing docker image
+  docker_image:
+    build:
+      path: roles/app/docker/.
+    name: "{{ repository_name }}/{{ item }}-example"
+    tag: "{{ docker_image_tag.stdout }}"
+    push: yes
+    force: yes
+    source: build
+  with_items: "{{ apps }}"
+
+- name: setting task definition
+  ecs_taskdefinition:
+    family: "{{ item }}-example"
+    containers:
+    - name: "{{ item }}"
+      cpu: "{{ task_cpu }}"
+      essential: true
+      image: "{{ repository_name }}/{{ item }}-example:{{ docker_image_tag.stdout }}"
+      memory: "{{ task_memory }}"
+      portMappings:
+      - containerPort: 8080
+        hostPort: 0
+      logConfiguration:
+        logDriver: awslogs
+        options:
+          awslogs-group: "/ecs/example/{{ item }}"
+          awslogs-region: "{{ region }}"
+          awslogs-stream-prefix: app
+      environment:
+        - name: "SENDHELLO"
+          value: "{{ item }}"
+    state: present
+    region: "{{ region }}"
+  register: task_output
+  with_items: "{{ apps }}"
+
+- name: setting service
+  ecs_service:
+    name: "{{ item.0.item }}-example"
+    cluster: "{{ ecs_cluster }}"
+    task_definition: "{{ item.0.taskdefinition.family }}:{{ item.0.taskdefinition.revision }}"
+    desired_count: 1
+    region: "{{ region }}"
+    service_registries:
+      - registryArn: "arn:aws:servicediscovery:{{ region }}:{{ aws_account_id }}:service/{{ item.1.stdout | regex_replace('service_id = ', '') }}"
+        container_name: "{{ item.0.item }}"
+        container_port: 8080
+    state: present
+  register: service
+  with_together:
+    - "{{ task_output.results }}"
+    - "{{ terraform_output.results }}"

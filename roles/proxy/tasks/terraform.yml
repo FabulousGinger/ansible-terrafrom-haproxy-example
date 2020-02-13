@@ -1,0 +1,59 @@
+---
+- name: setting terraform project
+  file:
+    path: "roles/proxy/haproxy"
+    state: directory
+
+- name: checking current terraform from s3
+  aws_s3:
+    bucket: "{{ bucket }}"
+    prefix: "example/haproxy/main.tf"
+    mode: list
+  register: terraform_s3
+
+- name: downloading current terraform from s3
+  aws_s3:
+    bucket: "{{ bucket }}"
+    object: "/example/haproxy/main.tf"
+    dest: "roles/proxy/haproxy/main.tf"
+    mode: get
+  when: (terraform_s3.s3_keys | length>0 )
+
+- name: setting terraform files
+  template:
+    src: main.tf.j2
+    dest: "roles/proxy/haproxy/main.tf"
+  register: terraform_template
+
+- name: applying terraform
+  terraform:
+    project_path: "roles/proxy/haproxy/"
+    force_init: yes
+    state: present
+  register: terraform_apply
+  when: terraform_template.changed
+
+- name: displaying terraform output
+  debug:
+    msg: "{{ terraform_apply.stdout_lines }}"
+  when: terraform_template.changed
+
+- name: uploading terraform to s3 on change
+  aws_s3:
+    bucket: "{{ bucket }}"
+    object: "/example/haproxy/main.tf"
+    src: "roles/proxy/haproxy/main.tf"
+    mode: put
+  when: terraform_template.changed
+
+- name: running terraform init
+  command: terraform init
+  args:
+    chdir: "roles/proxy/haproxy/"
+  when: terraform_template.changed == false
+
+- name: registering terraform target group arn output
+  command: terraform output
+  args:
+    chdir: "roles/proxy/haproxy/"
+  register: terraform_output
